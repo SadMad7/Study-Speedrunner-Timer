@@ -17,6 +17,8 @@ export interface Task {
   slideCount: number
   /** File name of the PDF attached to this task, if any. */
   pdfName?: string
+  /** User notes about the assignment or uploaded document. */
+  documentContext: string
 }
 
 /** A named set of tasks — the thing that gets saved and loaded. */
@@ -39,6 +41,8 @@ export interface CompletedTask {
   goalMs: number
   /** Actual time spent on this task, or null if it was never reached. */
   actualMs: number | null
+  /** Context notes captured when the session was saved. */
+  documentContext?: string
 }
 
 /** A finished or abandoned run, saved to history for later review. */

@@ -18,20 +18,26 @@ export interface TimerApi {
  * The timer "brain".
  *
  * Key idea: we never COUNT time (no `elapsed = elapsed + 1`). We record the
- * wall-clock timestamp when the current segment started, and elapsed time is
- * always `Date.now() - thatTimestamp`. The interval below exists ONLY to
+ * monotonic timestamp when the current segment started, and elapsed time is
+ * always `performance.now() - thatTimestamp`. The interval below exists ONLY to
  * trigger re-renders so the clock looks alive — it does not measure time.
  * That is why the clock stays accurate even if the interval fires unevenly.
  */
 export function useTimer(): TimerApi {
   const [status, setStatus] = useState<TimerStatus>('idle')
+  const statusRef = useRef<TimerStatus>('idle')
 
   // Time banked from earlier running segments (added to on every pause/finish).
   const bankedMsRef = useRef(0)
-  // Wall-clock timestamp when the current running segment began.
+  // Monotonic timestamp when the current running segment began.
   const segmentStartRef = useRef(0)
   // Bumped only to force a re-render while the timer is running.
   const [, setRenderTick] = useState(0)
+
+  const setTimerStatus = (next: TimerStatus): void => {
+    statusRef.current = next
+    setStatus(next)
+  }
 
   useEffect(() => {
     if (status !== 'running') return
@@ -42,37 +48,44 @@ export function useTimer(): TimerApi {
   }, [status])
 
   const readElapsed = (): number => {
-    if (status === 'running') {
-      return bankedMsRef.current + (Date.now() - segmentStartRef.current)
+    if (statusRef.current === 'running') {
+      return bankedMsRef.current + (performance.now() - segmentStartRef.current)
     }
     return bankedMsRef.current
   }
 
   const start = (): void => {
+    if (statusRef.current !== 'idle') return
     bankedMsRef.current = 0
-    segmentStartRef.current = Date.now()
-    setStatus('running')
+    segmentStartRef.current = performance.now()
+    setTimerStatus('running')
   }
 
   const pause = (): void => {
-    bankedMsRef.current += Date.now() - segmentStartRef.current
-    setStatus('paused')
+    if (statusRef.current !== 'running') return
+    bankedMsRef.current += performance.now() - segmentStartRef.current
+    setTimerStatus('paused')
   }
 
   const resume = (): void => {
-    segmentStartRef.current = Date.now()
-    setStatus('running')
+    if (statusRef.current !== 'paused') return
+    segmentStartRef.current = performance.now()
+    setTimerStatus('running')
   }
 
   const finish = (): void => {
-    bankedMsRef.current += Date.now() - segmentStartRef.current
-    setStatus('finished')
+    if (statusRef.current === 'running') {
+      bankedMsRef.current += performance.now() - segmentStartRef.current
+    } else if (statusRef.current !== 'paused') {
+      return
+    }
+    setTimerStatus('finished')
   }
 
   const reset = (): void => {
     bankedMsRef.current = 0
     segmentStartRef.current = 0
-    setStatus('idle')
+    setTimerStatus('idle')
   }
 
   return {

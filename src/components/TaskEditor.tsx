@@ -1,10 +1,14 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { RunStore } from '../state/runStore'
 import type { Difficulty, SessionRecord, Task } from '../types'
-import { formatDuration, parseDuration } from '../lib/time'
+import {
+  formatDuration,
+  parseDuration,
+  sanitizeDurationInput,
+} from '../lib/time'
 import { getPdfPageCount } from '../lib/pdf'
-import { suggestGoal } from '../lib/stats'
+import { buildSmartEstimate } from '../lib/smartEstimate'
 
 interface Props extends RunStore {
   /** Course names seen before, offered as autocomplete suggestions. */
@@ -82,32 +86,52 @@ interface CardProps {
  */
 function EditableTaskCard({ task, sessions, onChange, onRemove }: CardProps) {
   const [goalDraft, setGoalDraft] = useState(() => formatDuration(task.goalMs))
+  const [goalError, setGoalError] = useState<string | null>(null)
+  const [pageDraft, setPageDraft] = useState(() => String(task.slideCount))
   const [pdfBusy, setPdfBusy] = useState(false)
   const [pdfError, setPdfError] = useState<string | null>(null)
 
-  // A goal-time suggestion drawn from the user's own past tasks with the same
-  // course + difficulty (null until there are enough of them).
-  const suggestion = useMemo(
-    () => suggestGoal(sessions, task.category, task.difficulty),
-    [sessions, task.category, task.difficulty],
+  useEffect(() => {
+    setPageDraft(String(task.slideCount))
+  }, [task.slideCount])
+
+  const smartEstimate = useMemo(
+    () => buildSmartEstimate(task, sessions),
+    [task, sessions],
   )
+
+  const handleGoalDraft = (value: string): void => {
+    setGoalDraft(sanitizeDurationInput(value))
+    setGoalError(null)
+  }
 
   const commitGoal = (): void => {
     const parsed = parseDuration(goalDraft)
     if (parsed === null) {
+      setGoalError('Use 00:00 or 0:00:00.')
       setGoalDraft(formatDuration(task.goalMs))
     } else {
       onChange({ goalMs: parsed })
       setGoalDraft(formatDuration(parsed))
+      setGoalError(null)
     }
   }
 
-  const applySuggestion = (): void => {
-    if (!suggestion) return
-    // Round to the nearest second so the applied goal is a tidy value.
-    const rounded = Math.round(suggestion.avgMs / 1000) * 1000
-    onChange({ goalMs: rounded })
-    setGoalDraft(formatDuration(rounded))
+  const handlePageDraft = (value: string): void => {
+    setPageDraft(value.replace(/\D/g, ''))
+  }
+
+  const commitPages = (): void => {
+    const parsed = Number(pageDraft)
+    const next = Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0
+    onChange({ slideCount: next })
+    setPageDraft(String(next))
+  }
+
+  const applySmartEstimate = (): void => {
+    onChange({ goalMs: smartEstimate.recommendedMs })
+    setGoalDraft(formatDuration(smartEstimate.recommendedMs))
+    setGoalError(null)
   }
 
   const handlePdf = async (e: ChangeEvent<HTMLInputElement>): Promise<void> => {
@@ -174,51 +198,43 @@ function EditableTaskCard({ task, sessions, onChange, onRemove }: CardProps) {
         <label className="field">
           <span className="field__label">Goal time</span>
           <input
-            className="input"
+            className={`input ${goalError ? 'input--error' : ''}`}
             value={goalDraft}
-            onChange={(e) => setGoalDraft(e.target.value)}
+            inputMode="numeric"
+            pattern="[0-9:]*"
+            placeholder="00:00"
+            onChange={(e) => handleGoalDraft(e.target.value)}
             onBlur={commitGoal}
             onKeyDown={(e) => {
               if (e.key === 'Enter') e.currentTarget.blur()
             }}
+            aria-invalid={goalError ? true : undefined}
+            aria-describedby={goalError ? `${task.id}-goal-error` : undefined}
             aria-label={`Goal time for ${task.name}`}
           />
+          {goalError && (
+            <span className="field__error" id={`${task.id}-goal-error`}>
+              {goalError}
+            </span>
+          )}
         </label>
 
         <label className="field">
           <span className="field__label">Pages</span>
           <input
             className="input"
-            type="number"
-            min={0}
-            value={task.slideCount}
-            onChange={(e) =>
-              onChange({
-                slideCount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-              })
-            }
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={pageDraft}
+            onChange={(e) => handlePageDraft(e.target.value)}
+            onBlur={commitPages}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') e.currentTarget.blur()
+            }}
             aria-label={`Page count for ${task.name}`}
           />
         </label>
       </div>
-
-      {suggestion && (
-        <div className="task-card__suggestion">
-          <div className="task-card__suggestion-text">
-            Suggested goal <strong>{formatDuration(suggestion.avgMs)}</strong>
-            <span className="task-card__suggestion-sub">
-              your average over {suggestion.sampleSize} past {task.difficulty}{' '}
-              {task.category.trim()} tasks
-            </span>
-          </div>
-          <button
-            className="task-card__suggestion-btn"
-            onClick={applySuggestion}
-          >
-            Use
-          </button>
-        </div>
-      )}
 
       <div className="task-card__pdf">
         <input
@@ -235,6 +251,38 @@ function EditableTaskCard({ task, sessions, onChange, onRemove }: CardProps) {
           </span>
         )}
         {pdfError && <span className="task-card__pdf-error">{pdfError}</span>}
+      </div>
+
+      <label className="field task-card__context">
+        <span className="field__label">Document context</span>
+        <textarea
+          className="input task-card__context-input"
+          value={task.documentContext}
+          rows={3}
+          placeholder="Dense proofs, first pass, practice problems..."
+          onChange={(e) => onChange({ documentContext: e.target.value })}
+          aria-label={`Document context for ${task.name}`}
+        />
+      </label>
+
+      <div className="task-card__smart">
+        <div className="task-card__smart-top">
+          <div className="task-card__smart-main">
+            <span className="task-card__smart-label">Smart estimate</span>
+            <strong>{formatDuration(smartEstimate.recommendedMs)}</strong>
+            <span className="task-card__smart-sub">
+              {smartEstimate.confidence} confidence · {smartEstimate.basis}
+            </span>
+          </div>
+          <button className="task-card__smart-btn" onClick={applySmartEstimate}>
+            Use
+          </button>
+        </div>
+        <ul className="task-card__smart-reasons">
+          {smartEstimate.reasons.slice(0, 3).map((reason) => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
       </div>
     </div>
   )

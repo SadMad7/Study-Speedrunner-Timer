@@ -1,4 +1,4 @@
-import type { CompletedTask, Difficulty, Run, SessionRecord } from '../types'
+import type { CompletedTask, Difficulty, Run, SessionRecord, Task } from '../types'
 
 // The persistence layer: the ONLY file that talks to localStorage.
 // If we later move to a backend, this is the single file that changes.
@@ -9,6 +9,34 @@ const HISTORY_KEY = 'speedrun-study-timer:history'
 /** Coerce an unknown value into a valid Difficulty, defaulting to medium. */
 function toDifficulty(value: unknown): Difficulty {
   return value === 'easy' || value === 'hard' ? value : 'medium'
+}
+
+function toText(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback
+}
+
+function toNonNegativeNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : fallback
+}
+
+function toNonNegativeInteger(value: unknown, fallback = 0): number {
+  const number = toNonNegativeNumber(value, fallback)
+  return Math.floor(number)
+}
+
+function normalizeTask(raw: any): Task {
+  return {
+    id: typeof raw?.id === 'string' ? raw.id : crypto.randomUUID(),
+    name: toText(raw?.name, 'Untitled task'),
+    category: toText(raw?.category),
+    difficulty: toDifficulty(raw?.difficulty),
+    goalMs: toNonNegativeNumber(raw?.goalMs, 5 * 60_000),
+    slideCount: toNonNegativeInteger(raw?.slideCount),
+    pdfName: typeof raw?.pdfName === 'string' ? raw.pdfName : undefined,
+    documentContext: toText(raw?.documentContext),
+  }
 }
 
 export function loadRun(): Run | null {
@@ -25,15 +53,7 @@ export function loadRun(): Run | null {
     // difficulty...). We fill in defaults so old data keeps working.
     return {
       name: parsed.name,
-      tasks: parsed.tasks.map((task) => ({
-        id: task.id,
-        name: task.name,
-        category: typeof task.category === 'string' ? task.category : '',
-        difficulty: toDifficulty(task.difficulty),
-        goalMs: task.goalMs,
-        slideCount: typeof task.slideCount === 'number' ? task.slideCount : 0,
-        pdfName: typeof task.pdfName === 'string' ? task.pdfName : undefined,
-      })),
+      tasks: parsed.tasks.map(normalizeTask),
     }
   } catch {
     return null
@@ -52,27 +72,34 @@ export function saveRun(run: Run): void {
 // so each field is checked and defaulted individually.
 
 function normalizeCompletedTask(raw: any): CompletedTask {
+  const actualMs =
+    raw?.actualMs === null || raw?.actualMs === undefined
+      ? null
+      : toNonNegativeNumber(raw.actualMs, 0)
+
   return {
-    name: typeof raw?.name === 'string' ? raw.name : '',
-    category: typeof raw?.category === 'string' ? raw.category : '',
+    name: toText(raw?.name),
+    category: toText(raw?.category),
     difficulty: toDifficulty(raw?.difficulty),
-    slideCount: typeof raw?.slideCount === 'number' ? raw.slideCount : 0,
-    goalMs: typeof raw?.goalMs === 'number' ? raw.goalMs : 0,
-    actualMs: typeof raw?.actualMs === 'number' ? raw.actualMs : null,
+    slideCount: toNonNegativeInteger(raw?.slideCount),
+    goalMs: toNonNegativeNumber(raw?.goalMs),
+    actualMs,
+    documentContext: toText(raw?.documentContext),
   }
 }
 
 function normalizeSession(raw: any): SessionRecord {
   return {
     id: typeof raw?.id === 'string' ? raw.id : crypto.randomUUID(),
-    runName: typeof raw?.runName === 'string' ? raw.runName : 'Untitled Session',
+    runName: toText(raw?.runName, 'Untitled Session'),
     completedAt:
-      typeof raw?.completedAt === 'number' ? raw.completedAt : Date.now(),
+      typeof raw?.completedAt === 'number' && Number.isFinite(raw.completedAt)
+        ? raw.completedAt
+        : Date.now(),
     // Records saved before this field existed were always completed runs.
     completed: raw?.completed !== false,
-    totalGoalMs: typeof raw?.totalGoalMs === 'number' ? raw.totalGoalMs : 0,
-    totalElapsedMs:
-      typeof raw?.totalElapsedMs === 'number' ? raw.totalElapsedMs : 0,
+    totalGoalMs: toNonNegativeNumber(raw?.totalGoalMs),
+    totalElapsedMs: toNonNegativeNumber(raw?.totalElapsedMs),
     tasks: Array.isArray(raw?.tasks) ? raw.tasks.map(normalizeCompletedTask) : [],
   }
 }

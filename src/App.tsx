@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useRun } from './state/runStore'
 import { useHistory } from './state/historyStore'
 import { useTimer } from './hooks/useTimer'
@@ -32,6 +32,7 @@ export default function App() {
   // Attempt state — reset every time a new run starts.
   const [currentIndex, setCurrentIndex] = useState(0)
   const [splits, setSplits] = useState<number[]>([])
+  const splitsRef = useRef<number[]>([])
 
   // Cumulative goal time at each task. Derived from the tasks, never stored.
   const cumulativeGoals = useMemo(() => {
@@ -64,6 +65,7 @@ export default function App() {
   const handleStart = (): void => {
     setCurrentIndex(0)
     setSplits([])
+    splitsRef.current = []
     timer.start()
   }
 
@@ -72,6 +74,7 @@ export default function App() {
     finalSplits: number[],
     totalElapsedMs: number,
     completed: boolean,
+    includeActiveTask = false,
   ): void => {
     const record: SessionRecord = {
       id: crypto.randomUUID(),
@@ -84,13 +87,23 @@ export default function App() {
         // A task's own duration is its split minus the previous split.
         const reached = i < finalSplits.length
         const previousSplit = i === 0 ? 0 : finalSplits[i - 1]
+        const isActivePartial =
+          includeActiveTask &&
+          !reached &&
+          i === finalSplits.length &&
+          totalElapsedMs > previousSplit
         return {
           name: task.name,
           category: task.category,
           difficulty: task.difficulty,
           slideCount: task.slideCount,
           goalMs: task.goalMs,
-          actualMs: reached ? finalSplits[i] - previousSplit : null,
+          documentContext: task.documentContext,
+          actualMs: reached
+            ? finalSplits[i] - previousSplit
+            : isActivePartial
+              ? totalElapsedMs - previousSplit
+              : null,
         }
       }),
     }
@@ -98,8 +111,12 @@ export default function App() {
   }
 
   const handleSplit = (): void => {
+    if (timer.status !== 'running') return
+    if (splitsRef.current.length >= run.tasks.length) return
+
     // Read the exact time now, so the split is not rounded to the last render.
-    const nextSplits = [...splits, timer.readElapsed()]
+    const nextSplits = [...splitsRef.current, timer.readElapsed()]
+    splitsRef.current = nextSplits
     setSplits(nextSplits)
 
     if (nextSplits.length >= run.tasks.length) {
@@ -111,17 +128,18 @@ export default function App() {
   }
 
   const handleReset = (): void => {
-    // A reset mid-run is saved as an incomplete session (if any task was
-    // finished). A finished run was already saved, so we don't save it twice.
-    if (
-      (timer.status === 'running' || timer.status === 'paused') &&
-      splits.length >= 1
-    ) {
-      saveSession(splits, timer.readElapsed(), false)
+    // A reset mid-run is saved as an incomplete session, including the active
+    // task's partial time. A finished run was already saved, so don't save it twice.
+    if (timer.status === 'running' || timer.status === 'paused') {
+      const elapsed = timer.readElapsed()
+      if (elapsed > 0) {
+        saveSession(splitsRef.current, elapsed, false, true)
+      }
     }
     timer.reset()
     setCurrentIndex(0)
     setSplits([])
+    splitsRef.current = []
   }
 
   const isIdle = timer.status === 'idle'

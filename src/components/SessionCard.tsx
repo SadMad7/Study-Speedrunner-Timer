@@ -1,4 +1,3 @@
-import type { MouseEvent } from 'react'
 import type { CompletedTask, SessionRecord } from '../types'
 import { formatDateTime, formatDelta, formatDuration } from '../lib/time'
 
@@ -13,8 +12,7 @@ interface Props {
 export function SessionCard({ session, expanded, onToggle, onDelete }: Props) {
   const totalDelta = session.totalElapsedMs - session.totalGoalMs
 
-  const handleDelete = (e: MouseEvent): void => {
-    e.stopPropagation() // don't also toggle the card open/closed
+  const handleDelete = (): void => {
     if (window.confirm(`Delete "${session.runName}" from history?`)) {
       onDelete()
     }
@@ -22,32 +20,40 @@ export function SessionCard({ session, expanded, onToggle, onDelete }: Props) {
 
   return (
     <div className="session">
-      <div className="session__head" onClick={onToggle}>
-        <div className="session__info">
-          <div className="session__name">
-            <span className="session__name-text">{session.runName}</span>
-            {!session.completed && (
-              <span className="session__badge">Incomplete</span>
-            )}
+      <div className="session__head">
+        <button
+          className="session__toggle"
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+        >
+          <div className="session__info">
+            <div className="session__name">
+              <span className="session__name-text">{session.runName}</span>
+              {!session.completed && (
+                <span className="session__badge">Incomplete</span>
+              )}
+            </div>
+            <div className="session__date">
+              {formatDateTime(session.completedAt)}
+            </div>
           </div>
-          <div className="session__date">
-            {formatDateTime(session.completedAt)}
+          <div className="session__result">
+            <span className="session__time">
+              {formatDuration(session.totalElapsedMs)}
+            </span>
+            <span
+              className={`delta ${
+                totalDelta <= 0 ? 'delta--ahead' : 'delta--behind'
+              }`}
+            >
+              {formatDelta(totalDelta)}
+            </span>
           </div>
-        </div>
-        <div className="session__result">
-          <span className="session__time">
-            {formatDuration(session.totalElapsedMs)}
-          </span>
-          <span
-            className={`delta ${
-              totalDelta <= 0 ? 'delta--ahead' : 'delta--behind'
-            }`}
-          >
-            {formatDelta(totalDelta)}
-          </span>
-        </div>
+        </button>
         <button
           className="session__del"
+          type="button"
           onClick={handleDelete}
           aria-label="Delete session"
         >

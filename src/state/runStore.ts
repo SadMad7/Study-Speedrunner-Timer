@@ -17,6 +17,7 @@ const DEFAULT_RUN: Run = {
       difficulty: 'easy',
       goalMs: 10 * 60_000,
       slideCount: 0,
+      documentContext: '',
     },
     {
       id: createId(),
@@ -25,6 +26,7 @@ const DEFAULT_RUN: Run = {
       difficulty: 'hard',
       goalMs: 25 * 60_000,
       slideCount: 0,
+      documentContext: '',
     },
     {
       id: createId(),
@@ -33,6 +35,7 @@ const DEFAULT_RUN: Run = {
       difficulty: 'medium',
       goalMs: 15 * 60_000,
       slideCount: 0,
+      documentContext: '',
     },
   ],
 }
@@ -74,6 +77,7 @@ export function useRun(): RunStore {
           difficulty: 'medium',
           goalMs: 5 * 60_000,
           slideCount: 0,
+          documentContext: '',
         },
       ],
     }))

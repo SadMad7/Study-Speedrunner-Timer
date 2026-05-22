@@ -28,9 +28,13 @@ interface Bucket {
   count: number
 }
 
+interface CategoryBucket extends Bucket {
+  label: string
+}
+
 /** Aggregate every saved session into per-category and per-difficulty stats. */
 export function computeStats(sessions: SessionRecord[]): Stats {
-  const categoryBuckets = new Map<string, Bucket>()
+  const categoryBuckets = new Map<string, CategoryBucket>()
   const difficultyBuckets = new Map<Difficulty, Bucket>()
 
   for (const session of sessions) {
@@ -39,10 +43,15 @@ export function computeStats(sessions: SessionRecord[]): Stats {
       if (task.actualMs === null) continue
 
       const category = task.category.trim() || 'Uncategorized'
-      const catBucket = categoryBuckets.get(category) ?? { sum: 0, count: 0 }
+      const categoryKey = category.toLowerCase()
+      const catBucket = categoryBuckets.get(categoryKey) ?? {
+        label: category,
+        sum: 0,
+        count: 0,
+      }
       catBucket.sum += task.actualMs
       catBucket.count += 1
-      categoryBuckets.set(category, catBucket)
+      categoryBuckets.set(categoryKey, catBucket)
 
       // Accuracy needs a non-zero estimate to divide by.
       if (task.goalMs > 0) {
@@ -57,9 +66,9 @@ export function computeStats(sessions: SessionRecord[]): Stats {
     }
   }
 
-  const byCategory: CategoryStat[] = [...categoryBuckets.entries()]
-    .map(([category, bucket]) => ({
-      category,
+  const byCategory: CategoryStat[] = [...categoryBuckets.values()]
+    .map((bucket) => ({
+      category: bucket.label,
       taskCount: bucket.count,
       avgActualMs: bucket.sum / bucket.count,
     }))
@@ -94,6 +103,8 @@ export interface GoalSuggestion {
   avgMs: number
   /** How many past tasks the suggestion is based on. */
   sampleSize: number
+  /** Whether the suggestion used raw task duration or page-adjusted pace. */
+  basis: 'task' | 'page'
 }
 
 /**
@@ -108,12 +119,15 @@ export function suggestGoal(
   sessions: SessionRecord[],
   category: string,
   difficulty: Difficulty,
+  slideCount = 0,
 ): GoalSuggestion | null {
   const key = category.trim().toLowerCase()
   if (key === '') return null
 
   let sum = 0
   let count = 0
+  let paceSum = 0
+  let paceCount = 0
   for (const session of sessions) {
     for (const task of session.tasks) {
       // Only finished tasks have a real measured time to learn from.
@@ -122,9 +136,20 @@ export function suggestGoal(
       if (task.category.trim().toLowerCase() !== key) continue
       sum += task.actualMs
       count += 1
+      if (task.slideCount > 0) {
+        paceSum += task.actualMs / task.slideCount
+        paceCount += 1
+      }
     }
   }
 
+  if (slideCount > 0 && paceCount >= MIN_SUGGESTION_SAMPLES) {
+    return {
+      avgMs: (paceSum / paceCount) * slideCount,
+      sampleSize: paceCount,
+      basis: 'page',
+    }
+  }
   if (count < MIN_SUGGESTION_SAMPLES) return null
-  return { avgMs: sum / count, sampleSize: count }
+  return { avgMs: sum / count, sampleSize: count, basis: 'task' }
 }
