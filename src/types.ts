@@ -11,6 +11,16 @@ export interface Task {
   /** The course this task belongs to (free text; used to group stats). */
   category: string
   difficulty: Difficulty
+  /** What kind of study work this is (reading, practice, ...). */
+  taskType: TaskType
+  /** How familiar the material already feels. */
+  familiarity: Familiarity
+  /** How information-dense or demanding the material is. */
+  density: MaterialDensity
+  /** What the user needs to produce or get out of the task. */
+  deliverable: Deliverable
+  /** Expected focus/energy level for this attempt. */
+  focusLevel: FocusLevel
   /** Intended duration for THIS task alone, in milliseconds (the estimate). */
   goalMs: number
   /** How many pages/slides this task covers (0 = none assigned). */
@@ -20,6 +30,22 @@ export interface Task {
   /** User notes about the assignment or uploaded document. */
   documentContext: string
 }
+
+/** What kind of study work a task is — a feature for the estimator. */
+export type TaskType =
+  | 'reading'
+  | 'practice'
+  | 'writing'
+  | 'memorization'
+  | 'review'
+
+export type Familiarity = 'new' | 'some' | 'review'
+
+export type MaterialDensity = 'light' | 'normal' | 'dense'
+
+export type Deliverable = 'understand' | 'notes' | 'solve' | 'submit'
+
+export type FocusLevel = 'low' | 'normal' | 'high'
 
 /** A named set of tasks — the thing that gets saved and loaded. */
 export interface Run {
@@ -35,6 +61,12 @@ export interface CompletedTask {
   name: string
   category: string
   difficulty: Difficulty
+  /** What kind of study work this was. */
+  taskType: TaskType
+  familiarity: Familiarity
+  density: MaterialDensity
+  deliverable: Deliverable
+  focusLevel: FocusLevel
   /** Page count this task covered. */
   slideCount: number
   /** The estimated (goal) time, in milliseconds. */

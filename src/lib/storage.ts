@@ -1,4 +1,15 @@
-import type { CompletedTask, Difficulty, Run, SessionRecord, Task } from '../types'
+import type {
+  CompletedTask,
+  Deliverable,
+  Difficulty,
+  Familiarity,
+  FocusLevel,
+  MaterialDensity,
+  Run,
+  SessionRecord,
+  Task,
+  TaskType,
+} from '../types'
 
 // The persistence layer: the ONLY file that talks to localStorage.
 // If we later move to a backend, this is the single file that changes.
@@ -9,6 +20,34 @@ const HISTORY_KEY = 'speedrun-study-timer:history'
 /** Coerce an unknown value into a valid Difficulty, defaulting to medium. */
 function toDifficulty(value: unknown): Difficulty {
   return value === 'easy' || value === 'hard' ? value : 'medium'
+}
+
+/** Coerce an unknown value into a valid TaskType, defaulting to reading. */
+function toTaskType(value: unknown): TaskType {
+  return value === 'practice' ||
+    value === 'writing' ||
+    value === 'memorization' ||
+    value === 'review'
+    ? value
+    : 'reading'
+}
+
+function toFamiliarity(value: unknown): Familiarity {
+  return value === 'some' || value === 'review' ? value : 'new'
+}
+
+function toMaterialDensity(value: unknown): MaterialDensity {
+  return value === 'light' || value === 'dense' ? value : 'normal'
+}
+
+function toDeliverable(value: unknown): Deliverable {
+  return value === 'notes' || value === 'solve' || value === 'submit'
+    ? value
+    : 'understand'
+}
+
+function toFocusLevel(value: unknown): FocusLevel {
+  return value === 'low' || value === 'high' ? value : 'normal'
 }
 
 function toText(value: unknown, fallback = ''): string {
@@ -32,6 +71,11 @@ function normalizeTask(raw: any): Task {
     name: toText(raw?.name, 'Untitled task'),
     category: toText(raw?.category),
     difficulty: toDifficulty(raw?.difficulty),
+    taskType: toTaskType(raw?.taskType),
+    familiarity: toFamiliarity(raw?.familiarity),
+    density: toMaterialDensity(raw?.density),
+    deliverable: toDeliverable(raw?.deliverable),
+    focusLevel: toFocusLevel(raw?.focusLevel),
     goalMs: toNonNegativeNumber(raw?.goalMs, 5 * 60_000),
     slideCount: toNonNegativeInteger(raw?.slideCount),
     pdfName: typeof raw?.pdfName === 'string' ? raw.pdfName : undefined,
@@ -81,6 +125,11 @@ function normalizeCompletedTask(raw: any): CompletedTask {
     name: toText(raw?.name),
     category: toText(raw?.category),
     difficulty: toDifficulty(raw?.difficulty),
+    taskType: toTaskType(raw?.taskType),
+    familiarity: toFamiliarity(raw?.familiarity),
+    density: toMaterialDensity(raw?.density),
+    deliverable: toDeliverable(raw?.deliverable),
+    focusLevel: toFocusLevel(raw?.focusLevel),
     slideCount: toNonNegativeInteger(raw?.slideCount),
     goalMs: toNonNegativeNumber(raw?.goalMs),
     actualMs,

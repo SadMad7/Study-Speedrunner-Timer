@@ -1,4 +1,15 @@
-import type { CompletedTask, Difficulty, SessionRecord, Task } from '../types'
+import type {
+  CompletedTask,
+  Deliverable,
+  Difficulty,
+  Familiarity,
+  FocusLevel,
+  MaterialDensity,
+  SessionRecord,
+  Task,
+  TaskType,
+} from '../types'
+import { effectPerUnit, fitLinearRegression, predict } from './regression'
 
 export type EstimateConfidence = 'high' | 'medium' | 'low'
 
@@ -10,11 +21,6 @@ export interface SmartEstimate {
   reasons: string[]
 }
 
-interface ScoredContext {
-  multiplier: number
-  labels: string[]
-}
-
 interface EstimateSource {
   ms: number
   sampleSize: number
@@ -22,6 +28,9 @@ interface EstimateSource {
   basis: string
   reasons: string[]
 }
+
+/** Below this many past tasks, the learned model isn't trusted yet. */
+const MIN_TRAINING_SAMPLES = 12
 
 const DEFAULT_MINUTES_PER_PAGE: Record<Difficulty, number> = {
   easy: 2,
@@ -33,6 +42,74 @@ const DEFAULT_TASK_MS: Record<Difficulty, number> = {
   easy: 10 * 60_000,
   medium: 20 * 60_000,
   hard: 35 * 60_000,
+}
+
+const DIFFICULTY_ORDINAL: Record<Difficulty, number> = {
+  easy: 0,
+  medium: 1,
+  hard: 2,
+}
+
+const FAMILIARITY_ORDINAL: Record<Familiarity, number> = {
+  new: 0,
+  some: 1,
+  review: 2,
+}
+
+const DENSITY_ORDINAL: Record<MaterialDensity, number> = {
+  light: 0,
+  normal: 1,
+  dense: 2,
+}
+
+const FOCUS_ORDINAL: Record<FocusLevel, number> = {
+  low: 0,
+  normal: 1,
+  high: 2,
+}
+
+// 'review' is the reference category, so it gets no one-hot column.
+const ONE_HOT_TASK_TYPES: TaskType[] = [
+  'reading',
+  'practice',
+  'writing',
+  'memorization',
+]
+
+// 'understand' is the reference category.
+const ONE_HOT_DELIVERABLES: Deliverable[] = ['notes', 'solve', 'submit']
+
+const TASK_TYPE_MULTIPLIER: Record<TaskType, number> = {
+  reading: 1,
+  practice: 1.12,
+  writing: 1.18,
+  memorization: 1.08,
+  review: 0.86,
+}
+
+const FAMILIARITY_MULTIPLIER: Record<Familiarity, number> = {
+  new: 1.18,
+  some: 1,
+  review: 0.82,
+}
+
+const DENSITY_MULTIPLIER: Record<MaterialDensity, number> = {
+  light: 0.86,
+  normal: 1,
+  dense: 1.22,
+}
+
+const DELIVERABLE_MULTIPLIER: Record<Deliverable, number> = {
+  understand: 1,
+  notes: 1.08,
+  solve: 1.15,
+  submit: 1.22,
+}
+
+const FOCUS_MULTIPLIER: Record<FocusLevel, number> = {
+  low: 1.16,
+  normal: 1,
+  high: 0.92,
 }
 
 function average(values: number[]): number {
@@ -63,74 +140,92 @@ function actualMs(task: CompletedTask): number {
   return task.actualMs ?? 0
 }
 
-function scoreContext(task: Task): ScoredContext {
-  const text = [
-    task.name,
-    task.category,
-    task.pdfName ?? '',
-    task.documentContext,
+type FeatureInput = Pick<
+  Task,
+  | 'slideCount'
+  | 'difficulty'
+  | 'taskType'
+  | 'familiarity'
+  | 'density'
+  | 'deliverable'
+  | 'focusLevel'
+>
+
+/**
+ * Turn a task into the numeric feature vector the model learns from:
+ * [pages, difficulty, familiarity, density, focus, task type one-hots,
+ * deliverable one-hots].
+ */
+function taskFeatures(task: FeatureInput): number[] {
+  return [
+    task.slideCount,
+    DIFFICULTY_ORDINAL[task.difficulty],
+    FAMILIARITY_ORDINAL[task.familiarity],
+    DENSITY_ORDINAL[task.density],
+    FOCUS_ORDINAL[task.focusLevel],
+    ...ONE_HOT_TASK_TYPES.map((type) => (task.taskType === type ? 1 : 0)),
+    ...ONE_HOT_DELIVERABLES.map((type) =>
+      task.deliverable === type ? 1 : 0,
+    ),
   ]
+}
+
+function label(value: string): string {
+  return value.replace(/-/g, ' ')
+}
+
+function noteMultiplier(task: Task): { multiplier: number; reason: string | null } {
+  const text = [task.name, task.pdfName ?? '', task.documentContext]
     .join(' ')
     .toLowerCase()
 
-  const signals: Array<{
-    label: string
-    multiplier: number
-    words: string[]
-  }> = [
-    {
-      label: 'dense material',
-      multiplier: 1.18,
-      words: ['dense', 'technical', 'complex', 'difficult', 'heavy'],
-    },
-    {
-      label: 'math or proofs',
-      multiplier: 1.16,
-      words: ['proof', 'theorem', 'formula', 'equation', 'derivation'],
-    },
-    {
-      label: 'first pass',
-      multiplier: 1.15,
-      words: ['first pass', 'new material', 'unfamiliar', 'learn'],
-    },
-    {
-      label: 'practice work',
-      multiplier: 1.12,
-      words: ['practice', 'problem set', 'problems', 'exercises', 'homework'],
-    },
-    {
-      label: 'writing work',
-      multiplier: 1.12,
-      words: ['essay', 'write', 'writing', 'report', 'draft'],
-    },
-    {
-      label: 'memorization',
-      multiplier: 1.08,
-      words: ['memorize', 'flashcards', 'quiz', 'test', 'exam'],
-    },
-    {
-      label: 'review pass',
-      multiplier: 0.88,
-      words: ['review', 'recap', 'summary', 'skim', 'familiar', 'light'],
-    },
-  ]
-
   let multiplier = 1
-  const labels: string[] = []
+  const signals: string[] = []
 
-  for (const signal of signals) {
-    if (signal.words.some((word) => text.includes(word))) {
-      multiplier *= signal.multiplier
-      labels.push(signal.label)
-    }
+  const denseWords = ['proof', 'theorem', 'derivation', 'formula', 'equation']
+  if (denseWords.some((word) => text.includes(word))) {
+    multiplier *= 1.08
+    signals.push('technical wording')
   }
 
+  const easyWords = ['skim', 'quick', 'recap']
+  if (easyWords.some((word) => text.includes(word))) {
+    multiplier *= 0.92
+    signals.push('light-review wording')
+  }
+
+  if (signals.length === 0) return { multiplier: 1, reason: null }
+
   return {
-    multiplier: clamp(multiplier, 0.75, 1.45),
-    labels,
+    multiplier: clamp(multiplier, 0.85, 1.15),
+    reason: `Notes nudged the estimate for ${signals.join(' and ')}.`,
   }
 }
 
+function structuredContextMultiplier(
+  task: Task,
+): { multiplier: number; reasons: string[] } {
+  const reasons = [
+    `Context: ${label(task.taskType)}, ${label(task.familiarity)} familiarity, ${label(task.density)} density.`,
+    `Output/focus: ${label(task.deliverable)} with ${label(task.focusLevel)} focus.`,
+  ]
+
+  return {
+    multiplier:
+      TASK_TYPE_MULTIPLIER[task.taskType] *
+      FAMILIARITY_MULTIPLIER[task.familiarity] *
+      DENSITY_MULTIPLIER[task.density] *
+      DELIVERABLE_MULTIPLIER[task.deliverable] *
+      FOCUS_MULTIPLIER[task.focusLevel],
+    reasons,
+  }
+}
+
+/**
+ * The heuristic estimate: a tiered lookup over similar past tasks, falling
+ * back to sensible defaults. Used on its own until there is enough history
+ * to train the learned model.
+ */
 function chooseEstimateSource(
   task: Task,
   history: CompletedTask[],
@@ -244,6 +339,10 @@ function chooseEstimateSource(
   }
 }
 
+/**
+ * A gentle correction for users who consistently over- or under-run their
+ * estimates at a given difficulty. Only applied to the heuristic path.
+ */
 function difficultyAccuracyMultiplier(
   task: Task,
   history: CompletedTask[],
@@ -274,33 +373,89 @@ function difficultyAccuracyMultiplier(
   }
 }
 
+/**
+ * The learned estimate: a linear regression fit on every completed task in
+ * the user's history. Returns null until there is enough data to train it.
+ */
+function regressionSource(
+  task: Task,
+  history: CompletedTask[],
+): EstimateSource | null {
+  if (history.length < MIN_TRAINING_SAMPLES) return null
+
+  const rows = history.map(taskFeatures)
+  const targetMinutes = history.map((past) => actualMs(past) / 60_000)
+  const model = fitLinearRegression(rows, targetMinutes)
+
+  const predictedMinutes = predict(model, taskFeatures(task))
+  // A linear model can extrapolate to nonsense on thin data — keep it sane.
+  const notes = noteMultiplier(task)
+  const ms = clamp(predictedMinutes, 1, 600) * 60_000 * notes.multiplier
+
+  const confidence: EstimateConfidence =
+    history.length >= 25 ? 'high' : history.length >= 16 ? 'medium' : 'low'
+
+  const reasons = [
+    `Learned model trained on ${history.length} of your completed tasks.`,
+    ...structuredContextMultiplier(task).reasons,
+  ]
+  if (notes.reason) reasons.push(notes.reason)
+  if (task.slideCount > 0) {
+    const perPage = effectPerUnit(model, 0) // feature 0 is the page count
+    if (perPage > 0.1) {
+      reasons.push(`It puts your pace near ${perPage.toFixed(1)} min per page.`)
+    }
+  }
+
+  return {
+    ms,
+    sampleSize: history.length,
+    confidence,
+    basis: 'learned model',
+    reasons,
+  }
+}
+
+/** The heuristic path: tiered lookup plus the accuracy correction. */
+function heuristicSource(task: Task, history: CompletedTask[]): EstimateSource {
+  const source = chooseEstimateSource(task, history)
+  const accuracy = difficultyAccuracyMultiplier(task, history)
+  const structured = structuredContextMultiplier(task)
+  const notes = noteMultiplier(task)
+  const reasons = [...source.reasons]
+  if (accuracy.reason) reasons.push(accuracy.reason)
+  reasons.push(...structured.reasons)
+  if (notes.reason) reasons.push(notes.reason)
+  return {
+    ms:
+      source.ms *
+      accuracy.multiplier *
+      structured.multiplier *
+      notes.multiplier,
+    sampleSize: source.sampleSize,
+    confidence: source.confidence,
+    basis: source.basis,
+    reasons,
+  }
+}
+
+/**
+ * Recommend a goal time for a task. Once there is enough history, a model
+ * fit to the user's own data is used; below that, the heuristic takes over.
+ */
 export function buildSmartEstimate(
   task: Task,
   sessions: SessionRecord[],
 ): SmartEstimate {
   const history = completedTasks(sessions)
-  const source = chooseEstimateSource(task, history)
-  const context = scoreContext(task)
-  const accuracy = difficultyAccuracyMultiplier(task, history)
-
-  const adjustedMs = source.ms * context.multiplier * accuracy.multiplier
-  const reasons = [...source.reasons]
-
-  if (context.labels.length > 0) {
-    reasons.push(`Factored in task/document context: ${context.labels.join(', ')}.`)
-  } else if (task.pdfName || task.slideCount > 0) {
-    reasons.push('Used the uploaded document page count; add context notes to sharpen this.')
-  }
-
-  if (accuracy.reason) {
-    reasons.push(accuracy.reason)
-  }
+  const source =
+    regressionSource(task, history) ?? heuristicSource(task, history)
 
   return {
-    recommendedMs: roundToNearestMinute(adjustedMs),
+    recommendedMs: roundToNearestMinute(source.ms),
     confidence: source.confidence,
     sampleSize: source.sampleSize,
     basis: source.basis,
-    reasons,
+    reasons: source.reasons,
   }
 }

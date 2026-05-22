@@ -184,6 +184,9 @@ body {
   flex-direction: column;
   gap: 4px;
 }
+.field--wide {
+  grid-column: 1 / -1;
+}
 .field__label {
   font-size: 10px;
   letter-spacing: 0.5px;

@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { RunStore } from '../state/runStore'
-import type { Difficulty, SessionRecord, Task } from '../types'
+import type {
+  Deliverable,
+  Difficulty,
+  Familiarity,
+  FocusLevel,
+  MaterialDensity,
+  SessionRecord,
+  Task,
+  TaskType,
+} from '../types'
 import {
   formatDuration,
   parseDuration,
@@ -169,7 +178,7 @@ function EditableTaskCard({ task, sessions, onChange, onRemove }: CardProps) {
       </div>
 
       <div className="task-card__grid">
-        <label className="field">
+        <label className="field field--wide">
           <span className="field__label">Course</span>
           <input
             className="input"
@@ -192,6 +201,84 @@ function EditableTaskCard({ task, sessions, onChange, onRemove }: CardProps) {
             <option value="easy">Easy</option>
             <option value="medium">Medium</option>
             <option value="hard">Hard</option>
+          </select>
+        </label>
+
+        <label className="field">
+          <span className="field__label">Task type</span>
+          <select
+            className="input"
+            value={task.taskType}
+            onChange={(e) =>
+              onChange({ taskType: e.target.value as TaskType })
+            }
+          >
+            <option value="reading">Reading</option>
+            <option value="practice">Practice problems</option>
+            <option value="writing">Writing</option>
+            <option value="memorization">Memorization</option>
+            <option value="review">Review</option>
+          </select>
+        </label>
+
+        <label className="field">
+          <span className="field__label">Familiarity</span>
+          <select
+            className="input"
+            value={task.familiarity}
+            onChange={(e) =>
+              onChange({ familiarity: e.target.value as Familiarity })
+            }
+          >
+            <option value="new">New</option>
+            <option value="some">Some</option>
+            <option value="review">Review</option>
+          </select>
+        </label>
+
+        <label className="field">
+          <span className="field__label">Density</span>
+          <select
+            className="input"
+            value={task.density}
+            onChange={(e) =>
+              onChange({ density: e.target.value as MaterialDensity })
+            }
+          >
+            <option value="light">Light</option>
+            <option value="normal">Normal</option>
+            <option value="dense">Dense</option>
+          </select>
+        </label>
+
+        <label className="field">
+          <span className="field__label">Output</span>
+          <select
+            className="input"
+            value={task.deliverable}
+            onChange={(e) =>
+              onChange({ deliverable: e.target.value as Deliverable })
+            }
+          >
+            <option value="understand">Understand</option>
+            <option value="notes">Take notes</option>
+            <option value="solve">Solve</option>
+            <option value="submit">Submit</option>
+          </select>
+        </label>
+
+        <label className="field">
+          <span className="field__label">Focus</span>
+          <select
+            className="input"
+            value={task.focusLevel}
+            onChange={(e) =>
+              onChange({ focusLevel: e.target.value as FocusLevel })
+            }
+          >
+            <option value="low">Low</option>
+            <option value="normal">Normal</option>
+            <option value="high">High</option>
           </select>
         </label>
 
@@ -254,14 +341,14 @@ function EditableTaskCard({ task, sessions, onChange, onRemove }: CardProps) {
       </div>
 
       <label className="field task-card__context">
-        <span className="field__label">Document context</span>
+        <span className="field__label">Notes</span>
         <textarea
           className="input task-card__context-input"
           value={task.documentContext}
           rows={3}
-          placeholder="Dense proofs, first pass, practice problems..."
+          placeholder="Proof-heavy chapter, short quiz prep, mostly examples..."
           onChange={(e) => onChange({ documentContext: e.target.value })}
-          aria-label={`Document context for ${task.name}`}
+          aria-label={`Notes for ${task.name}`}
         />
       </label>
 
