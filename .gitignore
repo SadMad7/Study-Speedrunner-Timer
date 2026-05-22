@@ -1,0 +1,17 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+*.log
+
+# Environment variables — never commit secrets
+.env
+.env.*
+!.env.example
+
+# Vercel CLI project link
+.vercel
+
+# Local, machine-specific Claude Code settings
+.claude/settings.local.json
